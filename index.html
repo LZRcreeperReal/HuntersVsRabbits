@@ -68,6 +68,8 @@ label.f input{margin-top:4px;padding:10px}
 @keyframes p{50%{transform:scale(1.6)}}
 .leaflet-container{background:#1b1f26}
 .darktiles{filter:invert(1) hue-rotate(180deg) brightness(.95) contrast(.9)}
+.bar{height:10px;background:var(--line);border-radius:10px;overflow:hidden}
+.bar>div{height:100%;width:0;background:var(--accent);transition:width .4s}
 .leaflet-tooltip.lbl{background:#0d0f12cc;color:#fff;border:0;box-shadow:none;font-weight:700;font-size:12px;padding:2px 6px;border-radius:6px}
 .leaflet-tooltip.lbl:before{display:none}
 code{background:#ffffff14;padding:1px 5px;border-radius:5px}
@@ -90,8 +92,22 @@ code{background:#ffffff14;padding:1px 5px;border-radius:5px}
     <input id="joinCode" placeholder="CODE" maxlength="4" autocomplete="off" style="text-transform:uppercase;letter-spacing:6px;text-align:center;font-weight:800">
     <button id="btnJoin" style="flex:0 0 90px">Join</button>
   </div>
+  <button id="btnCalib">📡 Calibrate GPS</button>
+  <p class="small" id="calibLine"></p>
   <p class="small" id="homeMsg"></p>
   <p class="small">Joining a lobby shares your location with that lobby only. Rabbits' exact spots are only shown when they break their circle.</p>
+</section>
+
+<section id="calib" class="screen stack">
+  <h1>📡 Calibrate</h1>
+  <p class="sub">Go outside, away from tall buildings. Hold your phone the way you will during the game and don't move.</p>
+  <div class="card stack">
+    <div class="bar"><div id="calBar"></div></div>
+    <div id="calStatus">Tap Start, then hold still for 20 seconds.</div>
+    <div class="small" id="calStats"></div>
+  </div>
+  <button class="primary" id="calStart" style="width:100%">Start</button>
+  <button id="calBack" style="width:100%">Back</button>
 </section>
 
 <section id="lobby" class="screen stack">
@@ -108,6 +124,7 @@ code{background:#ffffff14;padding:1px 5px;border-radius:5px}
   <div class="small" id="areaLine"></div>
   <button id="btnEdit" style="display:none;width:100%">✏️ Draw boundary</button>
   <h2>Settings</h2>
+  <button id="btnAuto" style="display:none;width:100%">⚙️ Auto settings from boundary</button>
   <div class="grid2" id="settingsGrid"></div>
   <p class="small" id="startMsg"></p>
   <button class="primary" id="btnStart" style="display:none;width:100%">Start game</button>
@@ -142,6 +159,7 @@ code{background:#ffffff14;padding:1px 5px;border-radius:5px}
     <div class="grab" id="grab"></div>
     <div class="row" style="margin-bottom:10px">
       <b id="sheetTitle" style="flex:1">Players</b>
+      <button id="btnTaunt" style="display:none">😜 Taunt</button>
       <button id="btnMe">📍</button>
       <button id="btnSheet">▲</button>
     </div>
@@ -171,6 +189,16 @@ code{background:#ffffff14;padding:1px 5px;border-radius:5px}
   </div>
 </div>
 
+<div class="modal" id="tauntModal">
+  <div class="card stack">
+    <h2 style="margin-top:4px">😜 Taunt the hunters</h2>
+    <div class="stack" id="tauntList"></div>
+    <input id="tauntCustom" maxlength="40" placeholder="Or type your own…">
+    <label class="small" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="tauntBold" style="width:auto"> 🔥 Bold: also show hunters a ping of my area</label>
+    <div class="row"><button id="tauntCancel">Cancel</button><button class="primary" id="tauntSend">Send custom</button></div>
+  </div>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
@@ -189,7 +217,7 @@ const firebaseConfig = {
 /* ========================================================= */
 
 const DEF = {gameMin:45, headMin:0, circleR:12, revealSec:30, pingEvery:60, pingShow:10,
-  pingEarly:150, pingMid:75, pingLate:30, campSec:180, campR:50, borderGrace:10};
+  pingEarly:150, pingMid:75, pingLate:30, campSec:180, campR:50, borderGrace:15};
 const FIELDS = [
   ['gameMin','Hunt length (min)'],['headMin','Head start (min, 0 = auto)'],
   ['circleR','Freeze circle (m)'],['revealSec','Reveal time (s)'],
@@ -209,6 +237,22 @@ let auth, db, uid=null, code=null, lref=null, G=null, me=null, isHost=false, myP
 let rs={}, rsKey='', lastHunterWrite=0, warnList=[], infoMsg='', infoUntil=0, editPts=[], hideOverlay=false;
 let shownTag=0, wakeLock=null, geoId=null, firstFix=false, lastGList='', lastFit='', ending=0, lastRevealWrite=0;
 let lmap, lBound, emap, eLayer, gmap, dyn;
+let fixes=[], lastGood=null, jumpN=0, lastGoodAt=0, calRun=null, lastLogicT=0, lastTauntSeen=null;
+let calib=Number(localStorage.getItem('hunt_calib'))||0;
+
+/* ---------- GPS glitch filter ---------- */
+// Drops inaccurate fixes and impossible jumps, then smooths the last few readings.
+function filterFix(f){
+  if(f.acc>Math.max(40,calib*3))return null;
+  if(lastGood){const dt=Math.max(.5,(f.ts-lastGood.ts)/1000),d=dist(f,lastGood);
+    if(d/dt>9&&d>f.acc+lastGood.acc){jumpN++;if(jumpN<3)return null;fixes=[];}}
+  jumpN=0;lastGood=f;lastGoodAt=Date.now();
+  fixes.push(f);fixes=fixes.filter(x=>f.ts-x.ts<8000).slice(-5);
+  let w=0,lat=0,lng=0;for(const x of fixes){const k=1/Math.max(3,x.acc)**2;w+=k;lat+=x.lat*k;lng+=x.lng*k;}
+  return {lat:lat/w,lng:lng/w,acc:Math.min(...fixes.map(x=>x.acc)),ts:f.ts};
+}
+const gpsWeak=()=>Date.now()-lastGoodAt>8000;
+function buffer(){return Math.max(5,Math.min((myPos&&myPos.acc)||0,25),calib);}
 const now = () => Date.now() + skew;
 const Sx = () => Object.assign({}, DEF, (G && G.settings) || {});
 const B = () => {const b=(G&&G.boundary)||[];return Object.values(b).map(p=>Array.isArray(p)?p:Object.values(p));};
@@ -224,6 +268,13 @@ function areaM2(pts){if(pts.length<3)return 0;const lat0=pts.reduce((s,p)=>s+p[0
   for(let i=0,j=pts.length-1;i<pts.length;j=i++)a+=(pts[j][1]*kx)*(pts[i][0]*ky)-(pts[i][1]*kx)*(pts[j][0]*ky);
   return Math.abs(a/2);}
 function offsetM(lat,lng,dx,dy){return {lat:lat+dy/110540,lng:lng+dx/(111320*Math.cos(lat*Math.PI/180))};}
+function distToEdge(lat,lng,pts){const kx=111320*Math.cos(lat*Math.PI/180),ky=110540;let best=Infinity;
+  for(let i=0,j=pts.length-1;i<pts.length;j=i++){const ax=(pts[j][1]-lng)*kx,ay=(pts[j][0]-lat)*ky,bx=(pts[i][1]-lng)*kx,by=(pts[i][0]-lat)*ky;
+    const dx=bx-ax,dy=by-ay,L2=dx*dx+dy*dy;let t=L2?-(ax*dx+ay*dy)/L2:0;t=Math.max(0,Math.min(1,t));best=Math.min(best,Math.hypot(ax+t*dx,ay+t*dy));}
+  return best;}
+function autoSettings(pts){const side=Math.sqrt(areaM2(pts));const c=(v,a,b)=>Math.round(Math.min(b,Math.max(a,v)));const pe=c(side*0.3,50,400);
+  return {gameMin:c(side/15,15,90),headMin:0,circleR:c(side/40,8,30),pingEarly:pe,pingMid:Math.round(pe/2),pingLate:c(pe/5,15,80),
+    campR:Math.round(pe/3),revealSec:30,pingEvery:60,pingShow:10,campSec:180,borderGrace:15};}
 function autoHeadSec(pts){return Math.round(Math.min(600,Math.max(120,areaM2(pts)/400)));}
 function headMs(){const S=Sx();return (S.headMin>0?S.headMin*60:autoHeadSec(B()))*1000;}
 function pingRadius(t){const S=Sx(),T=G.timing;const left=T.endAt-t,total=T.endAt-T.huntAt;
@@ -253,7 +304,7 @@ function show(id){
 
 /* ---------- boot ---------- */
 function boot(){
-  $('name').value=localStorage.getItem('hunt_name')||'';
+  $('name').value=localStorage.getItem('hunt_name')||'';updCalibLine();
   $('settingsGrid').innerHTML=FIELDS.map(([k,l])=>`<label class="f">${l}<input type="number" inputmode="numeric" min="0" id="s_${k}"></label>`).join('');
   FIELDS.forEach(([k])=>$('s_'+k).addEventListener('change',e=>{const v=Number(e.target.value);if(!isHost||isNaN(v))return;lref.child('settings/'+k).set(Math.max(k==='gameMin'?1:0,v));}));
   if(!firebaseConfig.apiKey||firebaseConfig.apiKey.startsWith('PASTE')){show('setup');return;}
@@ -292,8 +343,8 @@ async function enterLobby(c,name){
   code=c;lref=db.ref('lobbies/'+code);
   const pref=lref.child('players/'+uid);
   const ex=(await pref.get()).val();
-  if(!ex)await pref.set({name,team:null,state:'alive',joinedAt:firebase.database.ServerValue.TIMESTAMP,online:true});
-  else await pref.update({name,online:true});
+  if(!ex)await pref.set({name,team:null,state:'alive',joinedAt:firebase.database.ServerValue.TIMESTAMP,online:true,calib:calib||null});
+  else await pref.update({name,online:true,calib:calib||null});
   pref.child('online').onDisconnect().set(false);
   localStorage.setItem('hunt_session',JSON.stringify({code,name}));
   lref.on('value',s=>{G=s.val();if(!G||!G.meta){leave('That lobby was closed.',true);return;}onLobby();});
@@ -325,7 +376,7 @@ function onLobby(){
   if(!me){leave('You were removed from the lobby.',true);return;}
   const st=G.meta.status;
   if(st==='lobby'){if(cur!=='lobby'&&cur!=='edit')show('lobby');hideOverlay=false;renderLobby();}
-  else if(st==='running'&&G.timing){if(cur!=='game'){show('game');wake();}loadRs();renderGame();tagCheck();}
+  else if(st==='running'&&G.timing){if(cur!=='game'){show('game');wake();}loadRs();renderGame();tagCheck();tauntCheck();}
   else if(st==='ended'){if(cur!=='end')show('end');renderEnd();releaseWake();$('tagModal').classList.remove('on');}
 }
 
@@ -334,7 +385,10 @@ function startGeo(){
   if(geoId!==null)return;
   if(!navigator.geolocation){$('gpsLine').textContent='This browser has no GPS support.';return;}
   geoId=navigator.geolocation.watchPosition(p=>{
-    myPos={lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy||0,ts:Date.now()};
+    const raw={lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy||0,ts:Date.now()};
+    if(calRun)calRun.push(raw);
+    const f=filterFix(raw);if(!f)return;
+    myPos=f;
     $('gpsLine').textContent='GPS locked · ±'+Math.round(myPos.acc)+' m';
     if(!firstFix){firstFix=true;if(lmap&&B().length<3)lmap.setView([myPos.lat,myPos.lng],17);if(emap&&!editPts.length)emap.setView([myPos.lat,myPos.lng],17);}
     onPos();
@@ -363,10 +417,11 @@ function renderLobby(){
   for(const id of ids){const p=P[id];let right;
     if(isHost)right=`<div class="seg"><button class="${p.team==='hunter'?'sel h':''}" data-team="hunter" data-id="${id}">🎯</button><button class="${p.team==='rabbit'?'sel r':''}" data-team="rabbit" data-id="${id}">🐇</button>${id!==uid?`<button data-kick="${id}">✕</button>`:''}</div>`;
     else right=`<span class="tag ${p.team?'t-'+p.team:'t-none'}">${p.team==='hunter'?'🎯 Hunter':p.team==='rabbit'?'🐇 Rabbit':'No team yet'}</span>`;
-    h+=`<div class="pl"><span class="n">${id===G.meta.host?'👑 ':''}${esc(p.name)}${id===uid?' (you)':''}${p.online===false?' <span class="small">· offline</span>':''}</span>${right}</div>`;}
+    h+=`<div class="pl"><span class="n">${id===G.meta.host?'👑 ':''}${esc(p.name)}${id===uid?' (you)':''}${p.online===false?' <span class="small">· offline</span>':''}${p.calib?' <span class="small">· 📡'+p.calib+'m</span>':''}</span>${right}</div>`;}
   $('pList').innerHTML=h;
   $('hostTeamBtns').style.display=isHost?'flex':'none';
   $('btnEdit').style.display=isHost?'block':'none';
+  $('btnAuto').style.display=isHost?'block':'none';
   $('btnStart').style.display=isHost?'block':'none';
   const S=Sx();
   for(const [k] of FIELDS){const el=$('s_'+k);el.disabled=!isHost;if(document.activeElement!==el)el.value=S[k];}
@@ -389,7 +444,7 @@ $('btnShuffle').onclick=()=>{const ids=Object.keys(G.players||{}).sort(()=>Math.
   const nh=Math.max(1,Math.round(ids.length/3));const up={};ids.forEach((id,i)=>up['players/'+id+'/team']=i<nh?'hunter':'rabbit');lref.update(up);};
 $('btnStart').onclick=async()=>{
   const t=now(),S=Sx(),hs=headMs();
-  const up={'meta/status':'running',timing:{startAt:t,huntAt:t+hs,endAt:t+hs+S.gameMin*60000},pings:null,reveals:null,tags:null,result:null,hunterPos:null,events:null};
+  const up={'meta/status':'running',timing:{startAt:t,huntAt:t+hs,endAt:t+hs+S.gameMin*60000},pings:null,reveals:null,tags:null,result:null,hunterPos:null,events:null,taunts:null};
   for(const id of Object.keys(G.players||{}))up['players/'+id+'/state']='alive';
   await lref.update(up);ev('Game on! Rabbits have '+fmt(hs)+' to hide.');
 };
@@ -406,7 +461,8 @@ function drawEdit(){eLayer.clearLayers();
 $('eUndo').onclick=()=>{editPts.pop();drawEdit();};
 $('eClear').onclick=()=>{if(confirm('Clear all points?')){editPts=[];drawEdit();}};
 $('eMe').onclick=()=>{if(myPos)emap.setView([myPos.lat,myPos.lng],18);};
-$('eSave').onclick=async()=>{if(editPts.length<3){alert('Add at least 3 points.');return;}await lref.child('boundary').set(editPts);show('lobby');renderLobby();};
+$('eSave').onclick=async()=>{if(editPts.length<3){alert('Add at least 3 points.');return;}await lref.update({boundary:editPts,settings:Object.assign(Sx(),autoSettings(editPts))});show('lobby');renderLobby();
+  $('startMsg').textContent='⚙️ Settings auto-tuned for this area. You can still change them.';};
 
 /* ---------- rabbit logic (runs on the rabbit's own phone) ---------- */
 function loadRs(){const k='hunt_r_'+code+'_'+G.timing.startAt;if(k!==rsKey){rsKey=k;rs=JSON.parse(localStorage.getItem(k)||'{}');}}
@@ -420,17 +476,20 @@ function writePing(kind,r){
 }
 function rabbitLogic(){
   warnList=[];
+  const _t=now();const dt=lastLogicT?Math.min(3000,Math.max(0,_t-lastLogicT)):0;lastLogicT=_t;
   if(!G||G.meta.status!=='running'||!G.timing||!me||me.team!=='rabbit'||me.state!=='alive'||!myPos||rs.dead)return;
   const t=now(),T=G.timing,S=Sx();
   const phase=t<T.huntAt?'head':t<T.endAt?'hunt':'over';if(phase==='over')return;
-  // border
-  if(!inPoly(myPos.lat,myPos.lng,B())){
-    if(!rs.outSince)rs.outSince=t;const left=S.borderGrace*1000-(t-rs.outSince);
+  const weak=gpsWeak(),buf=buffer(),pts=B();
+  if(weak)warnList.push('📶 Weak GPS: timers paused');
+  // border, with glitch buffer; the timer only counts while GPS is good
+  if(!inPoly(myPos.lat,myPos.lng,pts)&&distToEdge(myPos.lat,myPos.lng,pts)>buf){
+    if(!weak)rs.outMs=(rs.outMs||0)+dt;const left=S.borderGrace*1000-(rs.outMs||0);
     if(left<=0){rs.dead=true;saveRs();lref.child('players/'+uid+'/state').set('out');lref.child('reveals/'+uid).remove();ev('❌ '+me.name+' left the boundary and is out');return;}
     warnList.push('OUTSIDE BORDER: get back in '+Math.ceil(left/1000)+'s');navigator.vibrate&&navigator.vibrate(100);
-  }else rs.outSince=0;
+  }else rs.outMs=0;
   if(phase==='head'){
-    if(!rs.anchor||dist(myPos,rs.anchor)>15)rs.anchor={lat:myPos.lat,lng:myPos.lng,t};
+    if(!rs.anchor||dist(myPos,rs.anchor)>Math.max(15,buf+5))rs.anchor={lat:myPos.lat,lng:myPos.lng,t};
     const still=t-rs.anchor.t;
     if(still>=S.campSec*1000){writePing('camp',S.campR);rs.anchor.t=t;flash('You stayed still too long: hunters got a ping',5000);ev('🏕️ '+me.name+' was camping and got pinged');}
     else if(still>=Math.max(0,S.campSec-60)*1000)warnList.push('Keep moving: camping ping in '+Math.ceil((S.campSec*1000-still)/1000)+'s');
@@ -439,18 +498,18 @@ function rabbitLogic(){
     const idx=Math.floor((t-T.huntAt)/(S.pingEvery*1000));
     if(rs.pingIdx===undefined)rs.pingIdx=idx;else if(idx!==rs.pingIdx){rs.pingIdx=idx;if(idx>=1)writePing('timed',pingRadius(t));}
     if(rs.revealUntil){
-      if(t>=rs.revealUntil){rs.revealUntil=0;rs.circleOutAt=0;rs.circle={lat:myPos.lat,lng:myPos.lng};lref.child('reveals/'+uid).remove();flash('Reveal over: new circle set where you are',5000);}
+      if(t>=rs.revealUntil){rs.revealUntil=0;rs.cOutMs=0;rs.circle={lat:myPos.lat,lng:myPos.lng};lref.child('reveals/'+uid).remove();flash('Reveal over: new circle set where you are',5000);}
       else{warnList.push('📡 YOUR LOCATION IS VISIBLE: '+Math.ceil((rs.revealUntil-t)/1000)+'s');
         if(t-lastRevealWrite>=1000){lastRevealWrite=t;lref.child('reveals/'+uid).update({lat:myPos.lat,lng:myPos.lng,ts:t});}}
     }else{
-      const lim=S.circleR+Math.min(myPos.acc||0,20);
+      const lim=S.circleR+buf;
       if(dist(myPos,rs.circle)>lim){
-        if(!rs.circleOutAt)rs.circleOutAt=t;
-        if(t-rs.circleOutAt>=3000){rs.revealUntil=t+S.revealSec*1000;
+        if(!weak)rs.cOutMs=(rs.cOutMs||0)+dt;
+        if(rs.cOutMs>=4000){rs.cOutMs=0;rs.revealUntil=t+S.revealSec*1000;
           lref.child('reveals/'+uid).set({lat:myPos.lat,lng:myPos.lng,until:rs.revealUntil,ts:t});
           ev('🚨 '+me.name+' broke their circle!');navigator.vibrate&&navigator.vibrate([300,100,300]);}
         else warnList.push('LEAVING YOUR CIRCLE: step back in!');
-      }else rs.circleOutAt=0;
+      }else rs.cOutMs=0;
     }
   }
   saveRs();
@@ -489,6 +548,7 @@ function renderGame(){
   $('holdT').textContent=fmt(T.huntAt-t);
   const w=warnList.join(' · ');$('warn').style.display=w?'block':'none';$('warn').textContent=w;
   let info=t<infoUntil?infoMsg:'';
+  if(!info){const tn=Object.values(G.taunts||{}).filter(x=>x.t>t-7000).sort((a,b)=>b.t-a.t)[0];if(tn)info='🐇 '+tn.name+': "'+tn.text+'"';}
   if(!info){const e=Object.values(G.events||{}).filter(e=>e.t>t-6000).sort((a,b)=>b.t-a.t)[0];if(e)info=e.text;}
   $('info').style.display=info?'block':'none';$('info').textContent=info;
 
@@ -499,12 +559,12 @@ function renderGame(){
     for(const [id,h] of Object.entries(G.hunterPos||{})){if(id===uid||!h)continue;
       L.circleMarker([h.lat,h.lng],{radius:7,color:'#fff',weight:2,fillColor:'#ff4d4d',fillOpacity:1}).bindTooltip(nm(id),{permanent:true,direction:'top',offset:[0,-6],className:'lbl'}).addTo(dyn);}
     for(const [id,p] of Object.entries(G.pings||{})){if(!p||p.until<t)continue;
-      L.circle([p.lat,p.lng],{radius:p.r,color:p.kind==='camp'?'#ff9f43':'#4dd2ff',weight:2,fillOpacity:.18}).bindTooltip(nm(id)+(p.kind==='camp'?' (camping)':''),{permanent:true,direction:'center',className:'lbl'}).addTo(dyn);}
+      L.circle([p.lat,p.lng],{radius:p.r,color:p.kind==='camp'?'#ff9f43':p.kind==='taunt'?'#ff4dd2':'#4dd2ff',weight:2,fillOpacity:.18}).bindTooltip(nm(id)+(p.kind==='camp'?' (camping)':p.kind==='taunt'?' 😜':''),{permanent:true,direction:'center',className:'lbl'}).addTo(dyn);}
     for(const [id,r] of Object.entries(G.reveals||{})){if(!r||r.until<t)continue;
       L.marker([r.lat,r.lng],{icon:L.divIcon({className:'',html:'<div class="dot pulse" style="background:#ff4d4d"></div>',iconSize:[16,16],iconAnchor:[8,8]})})
         .bindTooltip('🚨 '+nm(id)+' '+Math.ceil((r.until-t)/1000)+'s',{permanent:true,direction:'top',offset:[0,-8],className:'lbl'}).addTo(dyn);}
   }else{
-    if(rs.circle&&phase==='hunt'){const inside=!myPos||dist(myPos,rs.circle)<=S.circleR+Math.min(myPos.acc||0,20);
+    if(rs.circle&&phase==='hunt'){const inside=!myPos||dist(myPos,rs.circle)<=S.circleR+buffer();
       L.circle([rs.circle.lat,rs.circle.lng],{radius:S.circleR,color:rs.revealUntil||!inside?'#ff4d4d':'#5ee68a',weight:3,fillOpacity:.15}).addTo(dyn);}
     const p=(G.pings||{})[uid];
     if(p&&p.until>=t)L.circle([p.lat,p.lng],{radius:p.r,color:'#ff9f43',weight:2,dashArray:'6 6',fillOpacity:.08}).bindTooltip('Hunters see this',{permanent:true,direction:'center',className:'lbl'}).addTo(dyn);
@@ -529,6 +589,7 @@ function renderGList(){
     h+=`<div class="pl"><span class="tag t-rabbit">🐇</span><span class="n" style="${p.state!=='alive'?'text-decoration:line-through;opacity:.5':''}">${esc(p.name)}${id===uid?' (you)':''}${p.online===false?' · offline':''}</span>${right}</div>`;}
   if(h!==lastGList){$('gList').innerHTML=h;lastGList=h;}
   $('btnEnd').style.display=isHost?'block':'none';
+  $('btnTaunt').style.display=me.team==='rabbit'&&me.state==='alive'?'block':'none';
 }
 $('btnPeek').onclick=()=>{hideOverlay=true;renderGame();};
 $('btnMe').onclick=()=>{if(myPos)gmap.setView([myPos.lat,myPos.lng],18);};
@@ -552,12 +613,61 @@ function renderEnd(){
   $('winTitle').textContent=r.winner==='rabbits'?'🐇 Rabbits win!':'🎯 Hunters win!';
   $('winSub').textContent=r.winner==='rabbits'?surv.length+' rabbit'+(surv.length===1?'':'s')+' survived':'Every rabbit was found';
   $('endList').innerHTML=rab.map(p=>`<div class="pl"><span class="n">🐇 ${esc(p.name)}</span><span class="small">${p.state==='alive'?'🏆 survived':p.state==='caught'?'✅ caught':'❌ out of bounds'}</span></div>`).join('')||'<span class="small">No rabbits</span>';
-  const evs=Object.values(G.events||{}).sort((a,b)=>a.t-b.t);
+  const evs=Object.values(G.events||{}).concat(Object.values(G.taunts||{}).map(x=>({t:x.t,text:'😜 '+x.name+': "'+x.text+'"'}))).sort((a,b)=>a.t-b.t);
   $('endLog').innerHTML=evs.map(e=>`<div>${T.startAt?fmt(e.t-T.startAt):''} · ${esc(e.text)}</div>`).join('')||'Nothing happened…';
   $('btnAgain').style.display=isHost?'block':'none';
 }
-$('btnAgain').onclick=()=>{const up={'meta/status':'lobby',timing:null,result:null,pings:null,reveals:null,tags:null,hunterPos:null,events:null};
+$('btnAgain').onclick=()=>{const up={'meta/status':'lobby',timing:null,result:null,pings:null,reveals:null,tags:null,hunterPos:null,events:null,taunts:null};
   for(const id of Object.keys(G.players||{}))up['players/'+id+'/state']='alive';lref.update(up);};
+
+/* ---------- calibration ---------- */
+let calTimer=null;
+function updCalibLine(){$('calibLine').textContent=calib?'📡 GPS calibrated · glitch buffer '+calib+' m':'Not calibrated yet. Recommended before playing.';}
+$('btnCalib').onclick=()=>{startGeo();$('calBar').style.width='0';$('calStatus').textContent='Tap Start, then hold still for 20 seconds.';$('calStats').textContent='';show('calib');};
+$('calBack').onclick=()=>{calRun=null;clearInterval(calTimer);$('calStart').disabled=false;show('home');updCalibLine();};
+$('calStart').onclick=()=>{startGeo();calRun=[];let s=0;$('calStart').disabled=true;$('calStatus').textContent='Hold still…';
+  calTimer=setInterval(()=>{s++;$('calBar').style.width=(s/20*100)+'%';$('calStats').textContent=(calRun?calRun.length:0)+' readings';
+    if(s>=20){clearInterval(calTimer);finishCal();}},1000);};
+function finishCal(){
+  const r=calRun||[];calRun=null;$('calStart').disabled=false;
+  if(r.length<4){$('calStatus').textContent='Not enough GPS readings. Make sure location is allowed and try outside.';return;}
+  const m={lat:r.reduce((a,x)=>a+x.lat,0)/r.length,lng:r.reduce((a,x)=>a+x.lng,0)/r.length};
+  const ds=r.map(x=>dist(x,m)).sort((a,b)=>a-b),p90=ds[Math.min(ds.length-1,Math.floor(ds.length*0.9))];
+  const accs=r.map(x=>x.acc).sort((a,b)=>a-b),med=accs[Math.floor(accs.length/2)];
+  calib=Math.round(Math.min(25,Math.max(5,p90*1.5+3,med*0.5)));localStorage.setItem('hunt_calib',calib);
+  const q=calib<=8?'🟢 Great signal':calib<=15?'🟡 OK signal':'🔴 Weak signal: try somewhere more open';
+  $('calStatus').textContent='Done! '+q;
+  $('calStats').textContent='Drift '+p90.toFixed(1)+' m · accuracy ±'+Math.round(med)+' m → glitch buffer '+calib+' m';
+  updCalibLine();if(lref)lref.child('players/'+uid+'/calib').set(calib);
+}
+
+/* ---------- auto settings ---------- */
+$('btnAuto').onclick=()=>{const pts=B();if(pts.length<3){alert('Draw a boundary first.');return;}
+  lref.child('settings').set(Object.assign(Sx(),autoSettings(pts)));$('startMsg').textContent='⚙️ Settings auto-tuned for this area.';};
+
+/* ---------- taunts ---------- */
+const TAUNTS=['Too slow! 🐢','I can see you 👀','Cold… very cold 🥶','Did you check behind you? 😏','Catch me if you can 🐇','Your cardio is showing 😮‍💨','Nice try, hunter 😂','Getting warmer? Nope. 🧊'];
+$('btnTaunt').onclick=()=>{$('tauntList').innerHTML=TAUNTS.map((x,i)=>`<button data-t="${i}" style="width:100%;text-align:left">${esc(x)}</button>`).join('');$('tauntModal').classList.add('on');};
+$('tauntList').onclick=e=>{const b=e.target.closest('button');if(b)sendTaunt(TAUNTS[b.dataset.t]);};
+$('tauntSend').onclick=()=>sendTaunt($('tauntCustom').value);
+$('tauntCancel').onclick=()=>$('tauntModal').classList.remove('on');
+function sendTaunt(text){
+  text=String(text||'').trim().slice(0,40);if(!text||!G||!me)return;const t=now();
+  if(rs.lastTaunt&&t-rs.lastTaunt<45000){alert('Taunt cooling down: '+Math.ceil((45000-(t-rs.lastTaunt))/1000)+'s');return;}
+  rs.lastTaunt=t;saveRs();
+  lref.child('taunts').push({uid,name:me.name,text,t});
+  if($('tauntBold').checked&&myPos&&G.timing)writePing('taunt',t>=G.timing.huntAt?pingRadius(t):Sx().pingEarly);
+  $('tauntModal').classList.remove('on');$('tauntCustom').value='';$('tauntBold').checked=false;flash('Taunt sent 😜',3000);
+}
+function tauntCheck(){
+  const mx=Object.values(G.taunts||{}).reduce((a,x)=>Math.max(a,x.t||0),0);
+  if(lastTauntSeen===null){lastTauntSeen=mx;return;}
+  if(mx>lastTauntSeen){lastTauntSeen=mx;if(me.team==='hunter'){navigator.vibrate&&navigator.vibrate([80,60,80,60,80]);beep();}}
+}
+let actx;
+function beep(){try{actx=actx||new (window.AudioContext||window.webkitAudioContext)();const o=actx.createOscillator(),g=actx.createGain();
+  o.type='square';o.frequency.value=880;g.gain.value=.08;o.connect(g);g.connect(actx.destination);o.start();
+  o.frequency.setValueAtTime(660,actx.currentTime+.12);o.stop(actx.currentTime+.25);}catch(e){}}
 
 /* ---------- loop ---------- */
 function tick(){
