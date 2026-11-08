@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0d0f12">
+<title>Hunt</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--bg:#0d0f12;--panel:#171a20;--line:#2a2f38;--text:#eef1f5;--dim:#8b93a1;--hunter:#ff4d4d;--rabbit:#4dd2ff;--accent:#ffd84d;--ok:#5ee68a}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.screen{display:none;min-height:100%;padding:16px;padding-top:max(16px,env(safe-area-inset-top));padding-bottom:max(24px,env(safe-area-inset-bottom))}
+.screen.on{display:block}
+h1{font-size:34px;margin:24px 0 4px;letter-spacing:-1px}
+h2{font-size:17px;margin:20px 0 8px}
+.sub{color:var(--dim);margin:0 0 20px}
+input{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:16px}
+input:disabled{opacity:.6}
+button{padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:15px;font-weight:600;cursor:pointer}
+button.primary{background:var(--accent);color:#111;border-color:var(--accent)}
+button.danger{background:var(--hunter);border-color:var(--hunter);color:#fff}
+button:disabled{opacity:.4}
+.row{display:flex;gap:8px;align-items:center}
+.row>*{flex:1}
+.stack>*+*{margin-top:10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px}
+.code{font:800 40px/1 ui-monospace,Menlo,monospace;letter-spacing:8px;text-align:center;padding:8px 0}
+.pl{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}
+.pl:last-child{border:0}
+.pl .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl button{padding:7px 10px;font-size:13px;flex:0 0 auto}
+.tag{font-size:12px;padding:3px 8px;border-radius:99px;font-weight:700;white-space:nowrap}
+.t-hunter{background:#ff4d4d22;color:var(--hunter)}
+.t-rabbit{background:#4dd2ff22;color:var(--rabbit)}
+.t-none{background:#ffffff11;color:var(--dim)}
+.small{font-size:13px;color:var(--dim)}
+.seg{display:flex;gap:6px;flex:0 0 auto}
+.seg button.sel.h{background:var(--hunter);border-color:var(--hunter);color:#fff}
+.seg button.sel.r{background:var(--rabbit);border-color:var(--rabbit);color:#111}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+label.f{display:block;font-size:12px;color:var(--dim)}
+label.f input{margin-top:4px;padding:10px}
+#lobbyMap{height:210px;border-radius:12px;overflow:hidden;border:1px solid var(--line)}
+#game,#edit{padding:0;position:fixed;inset:0}
+#map,#editMap{position:absolute;inset:0}
+#game .leaflet-top{top:125px}
+#edit .leaflet-top{top:70px}
+.hud{position:absolute;left:10px;right:10px;top:max(10px,env(safe-area-inset-top));z-index:1000;display:flex;flex-direction:column;gap:6px;pointer-events:none}
+.hud>*{pointer-events:auto}
+.pill{background:#0d0f12e6;border:1px solid var(--line);border-radius:12px;padding:8px 12px;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+.timer{font:800 26px/1 ui-monospace,Menlo,monospace}
+.warn{background:#ff4d4def;color:#fff;border-color:#ff4d4d;font-weight:700;display:none}
+.info{background:#ffd84def;color:#111;border-color:#ffd84d;font-weight:700;display:none}
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:1000;background:var(--panel);border-top:1px solid var(--line);border-radius:16px 16px 0 0;padding:8px 14px calc(14px + env(safe-area-inset-bottom));max-height:48%;overflow:auto}
+.sheet.min{max-height:calc(66px + env(safe-area-inset-bottom));overflow:hidden}
+.sheet .row button{flex:0 0 auto;padding:8px 12px}
+.grab{width:40px;height:4px;background:var(--line);border-radius:4px;margin:0 auto 8px}
+.overlay{position:absolute;inset:0;z-index:1500;background:#0d0f12f0;display:none;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;gap:10px}
+.overlay.on{display:flex}
+.big{font:800 64px/1 ui-monospace,Menlo,monospace}
+.modal{position:fixed;inset:0;z-index:3000;background:#000b;display:none;align-items:center;justify-content:center;padding:20px}
+.modal.on{display:flex}
+.modal .card{max-width:360px;width:100%}
+.editbar{position:absolute;left:10px;right:10px;bottom:calc(14px + env(safe-area-inset-bottom));z-index:1000}
+.dot{width:16px;height:16px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 2px #0006}
+.pulse{animation:p 1s infinite}
+@keyframes p{50%{transform:scale(1.6)}}
+.leaflet-container{background:#1b1f26}
+.leaflet-tooltip.lbl{background:#0d0f12cc;color:#fff;border:0;box-shadow:none;font-weight:700;font-size:12px;padding:2px 6px;border-radius:6px}
+.leaflet-tooltip.lbl:before{display:none}
+code{background:#ffffff14;padding:1px 5px;border-radius:5px}
+</style>
+</head>
+<body>
+
+<section id="setup" class="screen stack">
+  <h1>Hunt 🐇</h1>
+  <p class="sub">Backend not connected yet.</p>
+  <div class="card">Open this file, find <code>firebaseConfig</code> near the top of the script, paste in your Firebase config, and reload.</div>
+</section>
+
+<section id="home" class="screen stack">
+  <h1>Hunt 🐇</h1>
+  <p class="sub">Hunters vs Rabbits, in the real world.</p>
+  <input id="name" placeholder="Your name" maxlength="16" autocomplete="off">
+  <button class="primary" id="btnCreate">Create lobby</button>
+  <div class="row">
+    <input id="joinCode" placeholder="CODE" maxlength="4" autocomplete="off" style="text-transform:uppercase;letter-spacing:6px;text-align:center;font-weight:800">
+    <button id="btnJoin" style="flex:0 0 90px">Join</button>
+  </div>
+  <p class="small" id="homeMsg"></p>
+  <p class="small">Joining a lobby shares your location with that lobby only. Rabbits' exact spots are only shown when they break their circle.</p>
+</section>
+
+<section id="lobby" class="screen stack">
+  <div class="card">
+    <div class="small" style="text-align:center">Lobby code</div>
+    <div class="code" id="lCode"></div>
+    <div class="small" style="text-align:center" id="gpsLine">Waiting for GPS…</div>
+  </div>
+  <h2>Players <span class="small" id="pCount"></span></h2>
+  <div id="hostTeamBtns" class="row" style="display:none"><button id="btnShuffle">🎲 Random teams</button></div>
+  <div class="card" id="pList"></div>
+  <h2>Boundary</h2>
+  <div id="lobbyMap"></div>
+  <div class="small" id="areaLine"></div>
+  <button id="btnEdit" style="display:none;width:100%">✏️ Draw boundary</button>
+  <h2>Settings</h2>
+  <div class="grid2" id="settingsGrid"></div>
+  <p class="small" id="startMsg"></p>
+  <button class="primary" id="btnStart" style="display:none;width:100%">Start game</button>
+  <button id="btnLeave" style="width:100%">Leave lobby</button>
+</section>
+
+<section id="edit" class="screen">
+  <div id="editMap"></div>
+  <div class="hud"><div class="pill">Tap the map to add the corners of the play area. <b id="editCount"></b></div></div>
+  <div class="editbar row">
+    <button id="eUndo">Undo</button><button id="eClear">Clear</button><button id="eMe" style="flex:0 0 52px">📍</button><button class="primary" id="eSave">Save</button>
+  </div>
+</section>
+
+<section id="game" class="screen">
+  <div id="map"></div>
+  <div class="hud">
+    <div class="pill row" style="justify-content:space-between">
+      <div><div class="small" id="phase"></div><div class="timer" id="timer"></div></div>
+      <div style="text-align:right"><div class="small" id="roleLine"></div><div class="small" id="nextPing"></div></div>
+    </div>
+    <div class="pill warn" id="warn"></div>
+    <div class="pill info" id="info"></div>
+  </div>
+  <div class="overlay" id="hold">
+    <div class="small">RABBITS ARE HIDING</div>
+    <div class="big" id="holdT"></div>
+    <p class="small">Stay where you are. The hunt starts when this hits zero.</p>
+    <button id="btnPeek">Show map</button>
+  </div>
+  <div class="sheet min" id="sheet">
+    <div class="grab" id="grab"></div>
+    <div class="row" style="margin-bottom:10px">
+      <b id="sheetTitle" style="flex:1">Players</b>
+      <button id="btnMe">📍</button>
+      <button id="btnSheet">▲</button>
+    </div>
+    <div id="gList"></div>
+    <div class="row" style="margin-top:12px">
+      <button id="btnEnd" class="danger" style="display:none;flex:1">End game</button>
+      <button id="btnLeave2" style="flex:1">Leave</button>
+    </div>
+  </div>
+</section>
+
+<section id="end" class="screen stack">
+  <h1 id="winTitle"></h1>
+  <p class="sub" id="winSub"></p>
+  <div class="card" id="endList"></div>
+  <h2>Game log</h2>
+  <div class="card small" id="endLog"></div>
+  <button class="primary" id="btnAgain" style="display:none;width:100%">Back to lobby</button>
+  <button id="btnLeave3" style="width:100%">Leave</button>
+</section>
+
+<div class="modal" id="tagModal">
+  <div class="card stack">
+    <h2 id="tagText" style="margin-top:4px"></h2>
+    <p class="small">Only confirm if they really found you.</p>
+    <div class="row"><button id="tagNo">Not me</button><button class="danger" id="tagYes">Yes, caught</button></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+/* ============ PASTE YOUR FIREBASE CONFIG HERE ============ */
+const firebaseConfig = {
+  apiKey: "AIzaSyAKTHvrOFg3-glRbuiKjEa4dTaZN98pBuE",
+  authDomain: "hvr1-87f61.firebaseapp.com",
+  databaseURL: "https://hvr1-87f61-default-rtdb.firebaseio.com",
+  projectId: "hvr1-87f61",
+  storageBucket: "hvr1-87f61.firebasestorage.app",
+  messagingSenderId: "609817137986",
+  appId: "1:609817137986:web:d5f0e5ba20318b2ba26edb"
+};
+/* ========================================================= */
+
+const DEF = {gameMin:45, headMin:0, circleR:12, revealSec:30, pingEvery:60, pingShow:10,
+  pingEarly:150, pingMid:75, pingLate:30, campSec:180, campR:50, borderGrace:10};
+const FIELDS = [
+  ['gameMin','Hunt length (min)'],['headMin','Head start (min, 0 = auto)'],
+  ['circleR','Freeze circle (m)'],['revealSec','Reveal time (s)'],
+  ['pingEvery','Ping every (s)'],['pingShow','Ping visible (s)'],
+  ['pingEarly','Ping size early (m)'],['pingMid','Ping size mid (m)'],
+  ['pingLate','Ping size last 5 min (m)'],['campSec','Camping limit (s)'],
+  ['campR','Camping ping (m)'],['borderGrace','Border grace (s)']
+];
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad = n => String(n).padStart(2,'0');
+function fmt(ms){ms=Math.max(0,ms);const s=Math.ceil(ms/1000);return Math.floor(s/60)+':'+pad(s%60);}
+function fmtArea(a){const ha=a/10000;return (ha<1?Math.round(a)+' m²':ha.toFixed(1)+' ha')+' ('+(a/4046.86).toFixed(1)+' acres)';}
+
+let auth, db, uid=null, code=null, lref=null, G=null, me=null, isHost=false, myPos=null, cur='', skew=0;
+let rs={}, rsKey='', lastHunterWrite=0, warnList=[], infoMsg='', infoUntil=0, editPts=[], hideOverlay=false;
+let shownTag=0, wakeLock=null, geoId=null, firstFix=false, lastGList='', lastFit='', ending=0, lastRevealWrite=0;
+let lmap, lBound, emap, eLayer, gmap, dyn;
+const now = () => Date.now() + skew;
+const Sx = () => Object.assign({}, DEF, (G && G.settings) || {});
+const B = () => {const b=(G&&G.boundary)||[];return Object.values(b).map(p=>Array.isArray(p)?p:Object.values(p));};
+
+/* ---------- geometry ---------- */
+function dist(a,b){const R=6371000,r=Math.PI/180;const dLat=(b.lat-a.lat)*r,dLng=(b.lng-a.lng)*r;
+  const x=Math.sin(dLat/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dLng/2)**2;return 2*R*Math.asin(Math.sqrt(x));}
+function inPoly(lat,lng,pts){if(pts.length<3)return true;let c=false;
+  for(let i=0,j=pts.length-1;i<pts.length;j=i++){const [yi,xi]=pts[i],[yj,xj]=pts[j];
+    if(((yi>lat)!==(yj>lat))&&(lng<(xj-xi)*(lat-yi)/(yj-yi)+xi))c=!c;}return c;}
+function areaM2(pts){if(pts.length<3)return 0;const lat0=pts.reduce((s,p)=>s+p[0],0)/pts.length;
+  const kx=111320*Math.cos(lat0*Math.PI/180),ky=110540;let a=0;
+  for(let i=0,j=pts.length-1;i<pts.length;j=i++)a+=(pts[j][1]*kx)*(pts[i][0]*ky)-(pts[i][1]*kx)*(pts[j][0]*ky);
+  return Math.abs(a/2);}
+function offsetM(lat,lng,dx,dy){return {lat:lat+dy/110540,lng:lng+dx/(111320*Math.cos(lat*Math.PI/180))};}
+function autoHeadSec(pts){return Math.round(Math.min(600,Math.max(120,areaM2(pts)/400)));}
+function headMs(){const S=Sx();return (S.headMin>0?S.headMin*60:autoHeadSec(B()))*1000;}
+function pingRadius(t){const S=Sx(),T=G.timing;const left=T.endAt-t,total=T.endAt-T.huntAt;
+  if(left<=300000)return S.pingLate;return left/total>0.5?S.pingEarly:S.pingMid;}
+
+/* ---------- maps ---------- */
+function tiles(m,ctrl){
+  const dark=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:20,subdomains:'abcd',attribution:'&copy; OpenStreetMap contributors &copy; CARTO'});
+  const sat=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Imagery &copy; Esri'});
+  dark.addTo(m);if(ctrl)L.control.layers({'Map':dark,'Satellite':sat},null,{position:'topright'}).addTo(m);
+}
+function startView(){return myPos?[[myPos.lat,myPos.lng],17]:[[40.75,-73.98],12];}
+function ensureLmap(){if(lmap)return;const [c,z]=startView();lmap=L.map('lobbyMap',{zoomControl:false}).setView(c,z);tiles(lmap,false);lBound=L.layerGroup().addTo(lmap);}
+function ensureEmap(){if(emap)return;const [c,z]=startView();emap=L.map('editMap',{zoomControl:false}).setView(c,z);tiles(emap,true);eLayer=L.layerGroup().addTo(emap);
+  emap.on('click',e=>{editPts.push([+e.latlng.lat.toFixed(6),+e.latlng.lng.toFixed(6)]);drawEdit();});}
+function ensureGmap(){if(gmap)return;gmap=L.map('map',{zoomControl:false}).setView([40.75,-73.98],15);tiles(gmap,true);dyn=L.layerGroup().addTo(gmap);}
+function fitGame(){const pts=B();if(gmap&&pts.length>=3)gmap.fitBounds(L.polygon(pts).getBounds(),{padding:[30,30]});}
+
+function show(id){
+  cur=id;document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on',s.id===id));
+  setTimeout(()=>{
+    if(id==='lobby'){ensureLmap();lmap.invalidateSize();}
+    if(id==='edit'){ensureEmap();emap.invalidateSize();}
+    if(id==='game'){ensureGmap();gmap.invalidateSize();fitGame();lastGList='';renderGame();}
+  },60);
+}
+
+/* ---------- boot ---------- */
+function boot(){
+  $('name').value=localStorage.getItem('hunt_name')||'';
+  $('settingsGrid').innerHTML=FIELDS.map(([k,l])=>`<label class="f">${l}<input type="number" inputmode="numeric" min="0" id="s_${k}"></label>`).join('');
+  FIELDS.forEach(([k])=>$('s_'+k).addEventListener('change',e=>{const v=Number(e.target.value);if(!isHost||isNaN(v))return;lref.child('settings/'+k).set(Math.max(k==='gameMin'?1:0,v));}));
+  if(!firebaseConfig.apiKey||firebaseConfig.apiKey.startsWith('PASTE')){show('setup');return;}
+  firebase.initializeApp(firebaseConfig);auth=firebase.auth();db=firebase.database();
+  db.ref('.info/serverTimeOffset').on('value',s=>skew=s.val()||0);
+  show('home');$('homeMsg').textContent='Connecting…';
+  auth.onAuthStateChanged(async u=>{
+    if(!u)return;uid=u.uid;$('homeMsg').textContent='';
+    const saved=JSON.parse(localStorage.getItem('hunt_session')||'null');
+    if(saved&&saved.code){const m=(await db.ref('lobbies/'+saved.code+'/meta').get()).val();
+      if(m){startGeo();enterLobby(saved.code,saved.name);}else localStorage.removeItem('hunt_session');}
+  });
+  auth.signInAnonymously().catch(e=>$('homeMsg').textContent='Login failed: '+e.message+' (is Anonymous sign-in enabled?)');
+  setInterval(tick,1000);
+}
+
+function getName(){const n=$('name').value.trim().slice(0,16);if(!n){$('homeMsg').textContent='Enter your name first.';return null;}localStorage.setItem('hunt_name',n);return n;}
+function genCode(){const a='ABCDEFGHJKMNPQRSTUVWXYZ23456789';let s='';for(let i=0;i<4;i++)s+=a[Math.floor(Math.random()*a.length)];return s;}
+
+$('btnCreate').onclick=async()=>{
+  const name=getName();if(!name||!uid)return;startGeo();
+  let c;for(let i=0;i<10;i++){c=genCode();if(!(await db.ref('lobbies/'+c+'/meta').get()).exists())break;}
+  await db.ref('lobbies/'+c).set({meta:{host:uid,status:'lobby',createdAt:firebase.database.ServerValue.TIMESTAMP},settings:DEF});
+  enterLobby(c,name);
+};
+$('btnJoin').onclick=async()=>{
+  const name=getName();if(!name||!uid)return;
+  const c=$('joinCode').value.trim().toUpperCase();if(c.length!==4){$('homeMsg').textContent='Codes are 4 characters.';return;}
+  const snap=(await db.ref('lobbies/'+c).get()).val();
+  if(!snap){$('homeMsg').textContent='No lobby with that code.';return;}
+  if(snap.meta.status!=='lobby'&&!(snap.players&&snap.players[uid])){$('homeMsg').textContent='That game already started.';return;}
+  startGeo();enterLobby(c,name);
+};
+
+async function enterLobby(c,name){
+  code=c;lref=db.ref('lobbies/'+code);
+  const pref=lref.child('players/'+uid);
+  const ex=(await pref.get()).val();
+  if(!ex)await pref.set({name,team:null,state:'alive',joinedAt:firebase.database.ServerValue.TIMESTAMP,online:true});
+  else await pref.update({name,online:true});
+  pref.child('online').onDisconnect().set(false);
+  localStorage.setItem('hunt_session',JSON.stringify({code,name}));
+  lref.on('value',s=>{G=s.val();if(!G||!G.meta){leave('That lobby was closed.',true);return;}onLobby();});
+}
+
+async function leave(msg,silent){
+  const r=lref;const g=G;lref=null;
+  if(r){r.off();
+    if(!silent){const pr=r.child('players/'+uid);pr.child('online').onDisconnect().cancel();
+      try{
+        if(g&&g.meta&&g.meta.status==='lobby'){
+          if(g.meta.host===uid){const others=Object.keys(g.players||{}).filter(i=>i!==uid);
+            if(others.length)await r.update({'meta/host':others[0],['players/'+uid]:null});else await r.remove();}
+          else await pr.remove();
+        }else{await pr.child('online').set(false);
+          if(g&&g.meta&&g.meta.host===uid){const o=Object.keys(g.players||{}).find(i=>i!==uid&&g.players[i].online!==false);if(o)await r.child('meta/host').set(o);}}
+      }catch(e){}
+    }
+  }
+  G=null;code=null;me=null;localStorage.removeItem('hunt_session');releaseWake();$('tagModal').classList.remove('on');
+  show('home');$('homeMsg').textContent=msg||'';
+}
+$('btnLeave').onclick=()=>leave();
+$('btnLeave2').onclick=()=>{if(confirm('Leave the game?'))leave();};
+$('btnLeave3').onclick=()=>leave();
+
+function onLobby(){
+  isHost=G.meta.host===uid;me=(G.players||{})[uid];
+  if(!me){leave('You were removed from the lobby.',true);return;}
+  const st=G.meta.status;
+  if(st==='lobby'){if(cur!=='lobby'&&cur!=='edit')show('lobby');hideOverlay=false;renderLobby();}
+  else if(st==='running'&&G.timing){if(cur!=='game'){show('game');wake();}loadRs();renderGame();tagCheck();}
+  else if(st==='ended'){if(cur!=='end')show('end');renderEnd();releaseWake();$('tagModal').classList.remove('on');}
+}
+
+/* ---------- geolocation ---------- */
+function startGeo(){
+  if(geoId!==null)return;
+  if(!navigator.geolocation){$('gpsLine').textContent='This browser has no GPS support.';return;}
+  geoId=navigator.geolocation.watchPosition(p=>{
+    myPos={lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy||0,ts:Date.now()};
+    $('gpsLine').textContent='GPS locked · ±'+Math.round(myPos.acc)+' m';
+    if(!firstFix){firstFix=true;if(lmap&&B().length<3)lmap.setView([myPos.lat,myPos.lng],17);if(emap&&!editPts.length)emap.setView([myPos.lat,myPos.lng],17);}
+    onPos();
+  },e=>{$('gpsLine').textContent='Location blocked: allow location for this site in your browser settings.';},
+  {enableHighAccuracy:true,maximumAge:0,timeout:20000});
+}
+function onPos(){
+  if(!G||G.meta.status!=='running'||!me)return;
+  if(me.team==='hunter')hunterWrite();
+  rabbitLogic();renderGame();
+}
+function hunterWrite(){const t=now();if(!myPos||t-lastHunterWrite<3000)return;lastHunterWrite=t;
+  lref.child('hunterPos/'+uid).set({lat:myPos.lat,lng:myPos.lng,ts:t});}
+
+/* ---------- wake lock ---------- */
+async function wake(){try{if(navigator.wakeLock)wakeLock=await navigator.wakeLock.request('screen');}catch(e){}}
+function releaseWake(){try{wakeLock&&wakeLock.release();}catch(e){}wakeLock=null;}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&G&&G.meta&&G.meta.status==='running')wake();});
+
+/* ---------- lobby ---------- */
+function renderLobby(){
+  $('lCode').textContent=code;
+  const P=G.players||{};const ids=Object.keys(P).sort((a,b)=>(P[a].joinedAt||0)-(P[b].joinedAt||0));
+  $('pCount').textContent='('+ids.length+')';
+  let h='';
+  for(const id of ids){const p=P[id];let right;
+    if(isHost)right=`<div class="seg"><button class="${p.team==='hunter'?'sel h':''}" data-team="hunter" data-id="${id}">🎯</button><button class="${p.team==='rabbit'?'sel r':''}" data-team="rabbit" data-id="${id}">🐇</button>${id!==uid?`<button data-kick="${id}">✕</button>`:''}</div>`;
+    else right=`<span class="tag ${p.team?'t-'+p.team:'t-none'}">${p.team==='hunter'?'🎯 Hunter':p.team==='rabbit'?'🐇 Rabbit':'No team yet'}</span>`;
+    h+=`<div class="pl"><span class="n">${id===G.meta.host?'👑 ':''}${esc(p.name)}${id===uid?' (you)':''}${p.online===false?' <span class="small">· offline</span>':''}</span>${right}</div>`;}
+  $('pList').innerHTML=h;
+  $('hostTeamBtns').style.display=isHost?'flex':'none';
+  $('btnEdit').style.display=isHost?'block':'none';
+  $('btnStart').style.display=isHost?'block':'none';
+  const S=Sx();
+  for(const [k] of FIELDS){const el=$('s_'+k);el.disabled=!isHost;if(document.activeElement!==el)el.value=S[k];}
+  const pts=B();ensureLmap();lBound.clearLayers();
+  if(myPos)L.circleMarker([myPos.lat,myPos.lng],{radius:6,color:'#fff',weight:2,fillColor:'#ffd84d',fillOpacity:1}).addTo(lBound);
+  if(pts.length>=3){L.polygon(pts,{color:'#ffd84d',weight:3,fillOpacity:.1}).addTo(lBound);
+    const key=JSON.stringify(pts);if(key!==lastFit){lastFit=key;setTimeout(()=>lmap.fitBounds(L.polygon(pts).getBounds(),{padding:[20,20]}),80);}
+    $('areaLine').textContent='Area '+fmtArea(areaM2(pts))+' · head start '+(S.headMin>0?S.headMin+' min (set)':fmt(autoHeadSec(pts)*1000)+' (auto)');}
+  else $('areaLine').textContent=isHost?'No boundary yet. Tap Draw boundary.':'Host hasn\'t drawn the boundary yet.';
+  const teams=ids.map(i=>P[i].team);const probs=[];
+  if(pts.length<3)probs.push('draw a boundary');if(teams.some(x=>!x))probs.push('give everyone a team');
+  if(!teams.includes('hunter'))probs.push('1+ hunter');if(!teams.includes('rabbit'))probs.push('1+ rabbit');
+  $('btnStart').disabled=probs.length>0;
+  $('startMsg').textContent=isHost?(probs.length?'To start: '+probs.join(', '):'Ready to go!'):'Waiting for the host to start…';
+}
+$('pList').onclick=e=>{const b=e.target.closest('button');if(!b||!isHost)return;
+  if(b.dataset.team)lref.child('players/'+b.dataset.id+'/team').set(b.dataset.team);
+  if(b.dataset.kick&&confirm('Remove this player?'))lref.child('players/'+b.dataset.kick).remove();};
+$('btnShuffle').onclick=()=>{const ids=Object.keys(G.players||{}).sort(()=>Math.random()-.5);
+  const nh=Math.max(1,Math.round(ids.length/3));const up={};ids.forEach((id,i)=>up['players/'+id+'/team']=i<nh?'hunter':'rabbit');lref.update(up);};
+$('btnStart').onclick=async()=>{
+  const t=now(),S=Sx(),hs=headMs();
+  const up={'meta/status':'running',timing:{startAt:t,huntAt:t+hs,endAt:t+hs+S.gameMin*60000},pings:null,reveals:null,tags:null,result:null,hunterPos:null,events:null};
+  for(const id of Object.keys(G.players||{}))up['players/'+id+'/state']='alive';
+  await lref.update(up);ev('Game on! Rabbits have '+fmt(hs)+' to hide.');
+};
+
+/* ---------- boundary editor ---------- */
+$('btnEdit').onclick=()=>{editPts=B().map(p=>p.slice());show('edit');setTimeout(()=>{drawEdit();
+  if(editPts.length>=3)emap.fitBounds(L.polygon(editPts).getBounds(),{padding:[40,40]});else if(myPos)emap.setView([myPos.lat,myPos.lng],17);},120);};
+function drawEdit(){eLayer.clearLayers();
+  if(editPts.length>=3)L.polygon(editPts,{color:'#ffd84d',weight:3,fillOpacity:.12}).addTo(eLayer);
+  else if(editPts.length===2)L.polyline(editPts,{color:'#ffd84d',weight:3}).addTo(eLayer);
+  editPts.forEach(p=>L.circleMarker(p,{radius:6,color:'#111',weight:2,fillColor:'#ffd84d',fillOpacity:1}).addTo(eLayer));
+  if(myPos)L.circleMarker([myPos.lat,myPos.lng],{radius:7,color:'#fff',weight:3,fillColor:'#4dd2ff',fillOpacity:1}).addTo(eLayer);
+  $('editCount').textContent=editPts.length+' point'+(editPts.length===1?'':'s')+(editPts.length>=3?' · '+fmtArea(areaM2(editPts)):'');}
+$('eUndo').onclick=()=>{editPts.pop();drawEdit();};
+$('eClear').onclick=()=>{if(confirm('Clear all points?')){editPts=[];drawEdit();}};
+$('eMe').onclick=()=>{if(myPos)emap.setView([myPos.lat,myPos.lng],18);};
+$('eSave').onclick=async()=>{if(editPts.length<3){alert('Add at least 3 points.');return;}await lref.child('boundary').set(editPts);show('lobby');renderLobby();};
+
+/* ---------- rabbit logic (runs on the rabbit's own phone) ---------- */
+function loadRs(){const k='hunt_r_'+code+'_'+G.timing.startAt;if(k!==rsKey){rsKey=k;rs=JSON.parse(localStorage.getItem(k)||'{}');}}
+function saveRs(){if(rsKey)localStorage.setItem(rsKey,JSON.stringify(rs));}
+function ev(text){if(lref)lref.child('events').push({t:now(),text});}
+function flash(m,ms){infoMsg=m;infoUntil=now()+(ms||4000);}
+function writePing(kind,r){
+  const a=Math.random()*2*Math.PI,d=Math.sqrt(Math.random())*r*0.8;
+  const c=offsetM(myPos.lat,myPos.lng,Math.cos(a)*d,Math.sin(a)*d);const t=now();
+  lref.child('pings/'+uid).set({lat:c.lat,lng:c.lng,r,kind,at:t,until:t+Sx().pingShow*1000});
+}
+function rabbitLogic(){
+  warnList=[];
+  if(!G||G.meta.status!=='running'||!G.timing||!me||me.team!=='rabbit'||me.state!=='alive'||!myPos||rs.dead)return;
+  const t=now(),T=G.timing,S=Sx();
+  const phase=t<T.huntAt?'head':t<T.endAt?'hunt':'over';if(phase==='over')return;
+  // border
+  if(!inPoly(myPos.lat,myPos.lng,B())){
+    if(!rs.outSince)rs.outSince=t;const left=S.borderGrace*1000-(t-rs.outSince);
+    if(left<=0){rs.dead=true;saveRs();lref.child('players/'+uid+'/state').set('out');lref.child('reveals/'+uid).remove();ev('❌ '+me.name+' left the boundary and is out');return;}
+    warnList.push('OUTSIDE BORDER: get back in '+Math.ceil(left/1000)+'s');navigator.vibrate&&navigator.vibrate(100);
+  }else rs.outSince=0;
+  if(phase==='head'){
+    if(!rs.anchor||dist(myPos,rs.anchor)>15)rs.anchor={lat:myPos.lat,lng:myPos.lng,t};
+    const still=t-rs.anchor.t;
+    if(still>=S.campSec*1000){writePing('camp',S.campR);rs.anchor.t=t;flash('You stayed still too long: hunters got a ping',5000);ev('🏕️ '+me.name+' was camping and got pinged');}
+    else if(still>=Math.max(0,S.campSec-60)*1000)warnList.push('Keep moving: camping ping in '+Math.ceil((S.campSec*1000-still)/1000)+'s');
+  }else{
+    if(!rs.circle){rs.circle={lat:myPos.lat,lng:myPos.lng};flash('FROZEN! Stay inside your circle',6000);navigator.vibrate&&navigator.vibrate([200,100,200]);}
+    const idx=Math.floor((t-T.huntAt)/(S.pingEvery*1000));
+    if(rs.pingIdx===undefined)rs.pingIdx=idx;else if(idx!==rs.pingIdx){rs.pingIdx=idx;if(idx>=1)writePing('timed',pingRadius(t));}
+    if(rs.revealUntil){
+      if(t>=rs.revealUntil){rs.revealUntil=0;rs.circleOutAt=0;rs.circle={lat:myPos.lat,lng:myPos.lng};lref.child('reveals/'+uid).remove();flash('Reveal over: new circle set where you are',5000);}
+      else{warnList.push('📡 YOUR LOCATION IS VISIBLE: '+Math.ceil((rs.revealUntil-t)/1000)+'s');
+        if(t-lastRevealWrite>=1000){lastRevealWrite=t;lref.child('reveals/'+uid).update({lat:myPos.lat,lng:myPos.lng,ts:t});}}
+    }else{
+      const lim=S.circleR+Math.min(myPos.acc||0,20);
+      if(dist(myPos,rs.circle)>lim){
+        if(!rs.circleOutAt)rs.circleOutAt=t;
+        if(t-rs.circleOutAt>=3000){rs.revealUntil=t+S.revealSec*1000;
+          lref.child('reveals/'+uid).set({lat:myPos.lat,lng:myPos.lng,until:rs.revealUntil,ts:t});
+          ev('🚨 '+me.name+' broke their circle!');navigator.vibrate&&navigator.vibrate([300,100,300]);}
+        else warnList.push('LEAVING YOUR CIRCLE: step back in!');
+      }else rs.circleOutAt=0;
+    }
+  }
+  saveRs();
+}
+
+/* ---------- tagging ---------- */
+$('gList').onclick=e=>{const b=e.target.closest('button');if(!b)return;const P=G.players||{};
+  if(b.dataset.tag){const id=b.dataset.tag;if(!confirm('Mark '+P[id].name+' as found? They\'ll confirm on their phone.'))return;
+    lref.child('tags/'+id).set({by:uid,byName:me.name,at:now()});ev('🎯 '+me.name+' says they found '+P[id].name);}
+  if(b.dataset.force){const id=b.dataset.force;const tg=(G.tags||{})[id];if(confirm('Force-confirm '+P[id].name+' as caught?'))catchRabbit(id,tg?tg.byName:'host');}
+};
+function catchRabbit(id,byName){const P=G.players||{};
+  lref.update({['players/'+id+'/state']:'caught',['tags/'+id]:null,['reveals/'+id]:null});
+  ev('✅ '+(P[id]?P[id].name:'?')+' was caught by '+byName);}
+function tagCheck(){
+  const tg=(G.tags||{})[uid];
+  if(me.team==='rabbit'&&me.state==='alive'&&tg){
+    if(tg.at!==shownTag){shownTag=tg.at;$('tagText').textContent=tg.byName+' says they found you';$('tagModal').classList.add('on');navigator.vibrate&&navigator.vibrate([200,100,200]);}
+  }else $('tagModal').classList.remove('on');
+}
+$('tagYes').onclick=()=>{const tg=(G.tags||{})[uid];catchRabbit(uid,tg?tg.byName:'a hunter');$('tagModal').classList.remove('on');};
+$('tagNo').onclick=()=>{lref.child('tags/'+uid).remove();ev('🤔 '+me.name+' disputed the tag');$('tagModal').classList.remove('on');};
+
+/* ---------- game render ---------- */
+function renderGame(){
+  if(cur!=='game'||!G||!G.timing||!me||!gmap)return;
+  const t=now(),T=G.timing,S=Sx(),P=G.players||{};
+  const phase=t<T.huntAt?'head':t<T.endAt?'hunt':'over';
+  const rabbit=me.team==='rabbit',alive=me.state==='alive',hv=!rabbit||!alive;
+  $('phase').textContent=phase==='head'?'HEAD START':phase==='hunt'?'HUNT':'TIME UP';
+  $('timer').textContent=fmt(phase==='head'?T.huntAt-t:T.endAt-t);
+  $('roleLine').innerHTML=rabbit?(alive?'<b style="color:var(--rabbit)">🐇 Rabbit</b>':'👻 '+(me.state==='caught'?'Caught':'Out')+' · spectating'):'<b style="color:var(--hunter)">🎯 Hunter</b>';
+  if(phase==='hunt'){const ms=S.pingEvery*1000,nx=ms-((t-T.huntAt)%ms);$('nextPing').textContent='Ping in '+Math.ceil(nx/1000)+'s · '+pingRadius(t)+' m';}
+  else $('nextPing').textContent='';
+  $('hold').classList.toggle('on',phase==='head'&&me.team==='hunter'&&!hideOverlay);
+  $('holdT').textContent=fmt(T.huntAt-t);
+  const w=warnList.join(' · ');$('warn').style.display=w?'block':'none';$('warn').textContent=w;
+  let info=t<infoUntil?infoMsg:'';
+  if(!info){const e=Object.values(G.events||{}).filter(e=>e.t>t-6000).sort((a,b)=>b.t-a.t)[0];if(e)info=e.text;}
+  $('info').style.display=info?'block':'none';$('info').textContent=info;
+
+  dyn.clearLayers();
+  const pts=B();if(pts.length>=3)L.polygon(pts,{color:'#ffd84d',weight:3,fill:false,dashArray:'8 6'}).addTo(dyn);
+  const nm=id=>esc(P[id]?P[id].name:'?');
+  if(hv){
+    for(const [id,h] of Object.entries(G.hunterPos||{})){if(id===uid||!h)continue;
+      L.circleMarker([h.lat,h.lng],{radius:7,color:'#fff',weight:2,fillColor:'#ff4d4d',fillOpacity:1}).bindTooltip(nm(id),{permanent:true,direction:'top',offset:[0,-6],className:'lbl'}).addTo(dyn);}
+    for(const [id,p] of Object.entries(G.pings||{})){if(!p||p.until<t)continue;
+      L.circle([p.lat,p.lng],{radius:p.r,color:p.kind==='camp'?'#ff9f43':'#4dd2ff',weight:2,fillOpacity:.18}).bindTooltip(nm(id)+(p.kind==='camp'?' (camping)':''),{permanent:true,direction:'center',className:'lbl'}).addTo(dyn);}
+    for(const [id,r] of Object.entries(G.reveals||{})){if(!r||r.until<t)continue;
+      L.marker([r.lat,r.lng],{icon:L.divIcon({className:'',html:'<div class="dot pulse" style="background:#ff4d4d"></div>',iconSize:[16,16],iconAnchor:[8,8]})})
+        .bindTooltip('🚨 '+nm(id)+' '+Math.ceil((r.until-t)/1000)+'s',{permanent:true,direction:'top',offset:[0,-8],className:'lbl'}).addTo(dyn);}
+  }else{
+    if(rs.circle&&phase==='hunt'){const inside=!myPos||dist(myPos,rs.circle)<=S.circleR+Math.min(myPos.acc||0,20);
+      L.circle([rs.circle.lat,rs.circle.lng],{radius:S.circleR,color:rs.revealUntil||!inside?'#ff4d4d':'#5ee68a',weight:3,fillOpacity:.15}).addTo(dyn);}
+    const p=(G.pings||{})[uid];
+    if(p&&p.until>=t)L.circle([p.lat,p.lng],{radius:p.r,color:'#ff9f43',weight:2,dashArray:'6 6',fillOpacity:.08}).bindTooltip('Hunters see this',{permanent:true,direction:'center',className:'lbl'}).addTo(dyn);
+  }
+  if(myPos)L.circleMarker([myPos.lat,myPos.lng],{radius:8,color:'#fff',weight:3,fillColor:rabbit&&alive?'#4dd2ff':'#ff4d4d',fillOpacity:1}).addTo(dyn);
+  renderGList();
+}
+function renderGList(){
+  const P=G.players||{},tags=G.tags||{};const hunters=[],rabbits=[];
+  for(const [id,p] of Object.entries(P))(p.team==='hunter'?hunters:rabbits).push([id,p]);
+  const alive=rabbits.filter(r=>r[1].state==='alive').length;
+  $('sheetTitle').textContent='🐇 '+alive+'/'+rabbits.length+' rabbits left';
+  let h='<div class="small">HUNTERS</div>';
+  for(const [id,p] of hunters)h+=`<div class="pl"><span class="tag t-hunter">🎯</span><span class="n">${esc(p.name)}${id===uid?' (you)':''}</span>${p.online===false?'<span class="small">offline</span>':''}</div>`;
+  h+='<div class="small" style="margin-top:12px">RABBITS</div>';
+  for(const [id,p] of rabbits){let right;
+    if(p.state==='alive'){
+      if(tags[id])right='<span class="small">waiting for confirm…</span>'+(isHost?`<button data-force="${id}">Force</button>`:'');
+      else if(me.team==='hunter')right=`<button class="danger" data-tag="${id}">Found</button>`;
+      else right='<span class="small" style="color:var(--ok)">hiding</span>';
+    }else right=`<span class="small">${p.state==='caught'?'✅ caught':'❌ out'}</span>`;
+    h+=`<div class="pl"><span class="tag t-rabbit">🐇</span><span class="n" style="${p.state!=='alive'?'text-decoration:line-through;opacity:.5':''}">${esc(p.name)}${id===uid?' (you)':''}${p.online===false?' · offline':''}</span>${right}</div>`;}
+  if(h!==lastGList){$('gList').innerHTML=h;lastGList=h;}
+  $('btnEnd').style.display=isHost?'block':'none';
+}
+$('btnPeek').onclick=()=>{hideOverlay=true;renderGame();};
+$('btnMe').onclick=()=>{if(myPos)gmap.setView([myPos.lat,myPos.lng],18);};
+const toggleSheet=()=>{const s=$('sheet');s.classList.toggle('min');$('btnSheet').textContent=s.classList.contains('min')?'▲':'▼';};
+$('btnSheet').onclick=toggleSheet;$('grab').onclick=toggleSheet;
+$('btnEnd').onclick=()=>{if(!confirm('End the game now?'))return;
+  const alive=Object.values(G.players||{}).filter(p=>p.team==='rabbit'&&p.state==='alive').length;
+  finish(alive?'rabbits':'hunters');};
+
+/* ---------- win / end ---------- */
+function finish(w){const t=now();if(t-ending<3000)return;ending=t;
+  lref.child('result').transaction(c=>c||{winner:w,at:t}).then(()=>lref&&lref.child('meta/status').set('ended'));}
+function winCheck(){
+  if(!G||!G.meta||G.meta.status!=='running'||!G.timing||G.result)return;
+  const rab=Object.values(G.players||{}).filter(p=>p.team==='rabbit');const alive=rab.filter(p=>p.state==='alive').length;
+  if(rab.length&&alive===0)finish('hunters');else if(now()>=G.timing.endAt)finish(alive?'rabbits':'hunters');
+}
+function renderEnd(){
+  const r=G.result||{},P=G.players||{},T=G.timing||{};
+  const rab=Object.values(P).filter(p=>p.team==='rabbit');const surv=rab.filter(p=>p.state==='alive');
+  $('winTitle').textContent=r.winner==='rabbits'?'🐇 Rabbits win!':'🎯 Hunters win!';
+  $('winSub').textContent=r.winner==='rabbits'?surv.length+' rabbit'+(surv.length===1?'':'s')+' survived':'Every rabbit was found';
+  $('endList').innerHTML=rab.map(p=>`<div class="pl"><span class="n">🐇 ${esc(p.name)}</span><span class="small">${p.state==='alive'?'🏆 survived':p.state==='caught'?'✅ caught':'❌ out of bounds'}</span></div>`).join('')||'<span class="small">No rabbits</span>';
+  const evs=Object.values(G.events||{}).sort((a,b)=>a.t-b.t);
+  $('endLog').innerHTML=evs.map(e=>`<div>${T.startAt?fmt(e.t-T.startAt):''} · ${esc(e.text)}</div>`).join('')||'Nothing happened…';
+  $('btnAgain').style.display=isHost?'block':'none';
+}
+$('btnAgain').onclick=()=>{const up={'meta/status':'lobby',timing:null,result:null,pings:null,reveals:null,tags:null,hunterPos:null,events:null};
+  for(const id of Object.keys(G.players||{}))up['players/'+id+'/state']='alive';lref.update(up);};
+
+/* ---------- loop ---------- */
+function tick(){
+  if(!G||!G.meta)return;
+  if(G.meta.status==='running'&&me){if(me.team==='hunter')hunterWrite();rabbitLogic();winCheck();renderGame();}
+}
+boot();
+</script>
+</body>
+</html>
