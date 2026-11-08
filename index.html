@@ -67,6 +67,7 @@ label.f input{margin-top:4px;padding:10px}
 .pulse{animation:p 1s infinite}
 @keyframes p{50%{transform:scale(1.6)}}
 .leaflet-container{background:#1b1f26}
+.darktiles{filter:invert(1) hue-rotate(180deg) brightness(.95) contrast(.9)}
 .leaflet-tooltip.lbl{background:#0d0f12cc;color:#fff;border:0;box-shadow:none;font-weight:700;font-size:12px;padding:2px 6px;border-radius:6px}
 .leaflet-tooltip.lbl:before{display:none}
 code{background:#ffffff14;padding:1px 5px;border-radius:5px}
@@ -230,7 +231,7 @@ function pingRadius(t){const S=Sx(),T=G.timing;const left=T.endAt-t,total=T.endA
 
 /* ---------- maps ---------- */
 function tiles(m,ctrl){
-  const dark=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:20,subdomains:'abcd',attribution:'&copy; OpenStreetMap contributors &copy; CARTO'});
+  const dark=L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,className:'darktiles',attribution:'&copy; OpenStreetMap contributors'});
   const sat=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Imagery &copy; Esri'});
   dark.addTo(m);if(ctrl)L.control.layers({'Map':dark,'Satellite':sat},null,{position:'topright'}).addTo(m);
 }
